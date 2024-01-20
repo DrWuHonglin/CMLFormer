@@ -352,7 +352,7 @@ class base_resnet(nn.Module):
         return x1, x2, x3, x4
 
 
-class Unet(nn.Module):
+class CMLFormer(nn.Module):
     def __init__(self,
                  decode_channels=64,
                  dropout=0.1,
@@ -386,7 +386,7 @@ class Unet(nn.Module):
 
 if __name__ == '__main__':
     x = torch.randn(6, 256, 256, 3)
-    net = Unet(num_classes=6, pretrained=True)
+    net = CMLFormer(num_classes=6, pretrained=True)
     from thop import profile
     from thop import clever_format
     flops, params = profile(net, inputs=(x,))
