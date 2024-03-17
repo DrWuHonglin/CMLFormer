@@ -6,6 +6,8 @@ import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import timm
 from torchvision.models import resnet18
+from thop import profile
+from thop import clever_format
 
 
 class ConvBNReLU(nn.Sequential):
@@ -70,7 +72,6 @@ class MSC(nn.Module):
         attn_2 = self.conv2_2(attn_2)
         attn = attn_0 + attn_1 + attn_2
 
-        # attn = self.conv3(attn) *u
         x = self.act(attn)
         x = self.fc2(x)
 
@@ -134,11 +135,9 @@ class LMSA(nn.Module):
         self.relative_pos_embedding = relative_pos_embedding
 
         if self.relative_pos_embedding:
-            # define a parameter table of relative position bias
             self.relative_position_bias_table = nn.Parameter(
                 torch.zeros((2 * window_size - 1) * (2 * window_size - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
 
-            # get pair-wise relative position index for each token inside the window
             coords_h = torch.arange(self.ws)
             coords_w = torch.arange(self.ws)
             coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
@@ -194,9 +193,6 @@ class LMSA(nn.Module):
 
         attn = attn[:, :, :H, :W]
 
-        # out = self.attn_x(F.pad(attn, pad=(0, 0, 0, 1), mode='reflect')) + \
-        #       self.attn_y(F.pad(attn, pad=(0, 1, 0, 0), mode='reflect'))
-
         out = attn + short
         out = self.pad_out(out)
         out = self.proj(out)
@@ -224,7 +220,7 @@ class MLTB(nn.Module):
         return x
 
 
-class Spatial(nn.Module):
+class Channel(nn.Module):
     def __init__(self, in_size, out_size):
         super(Spatial, self).__init__()
         self.conv1 = nn.Conv2d(out_size * 2, out_size, kernel_size=3, padding=1)
@@ -241,7 +237,7 @@ class Spatial(nn.Module):
         return outputs
 
 
-class Channel(nn.Module):
+class Spatial(nn.Module):
     def __init__(self, in_channels=128, decode_channels=128, eps=1e-8):
         super(Channel, self).__init__()
         self.pre_conv = Conv(in_channels, decode_channels, kernel_size=1)
@@ -256,7 +252,6 @@ class Channel(nn.Module):
     def forward(self, x, res):
         x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
         x = self.conv(x + self.pre_conv(res))
-        # x1,x2 = x.chunk(2,dim=1)
         x1 = self.maxpool(x)
         x2 = self.sigmoid(x)
         x = x1 + x2
@@ -288,7 +283,6 @@ class Decoder(nn.Module):
         if self.training:
             self.up4 = nn.UpsamplingBilinear2d(scale_factor=4)
             self.up3 = nn.UpsamplingBilinear2d(scale_factor=2)
-            # self.aux_head = AuxHead(decode_channels, num_classes)
         self.p1 = Spatial(encoder_channels[-4], decode_channels)
         self.q1 = Channel(encoder_channels[-4], decode_channels)
         self.segmentation_head = nn.Sequential(ConvBNReLU(encoder_channels[1], decode_channels),
@@ -387,8 +381,6 @@ class CMLFormer(nn.Module):
 if __name__ == '__main__':
     x = torch.randn(6, 256, 256, 3)
     net = CMLFormer(num_classes=6, pretrained=True)
-    from thop import profile
-    from thop import clever_format
     flops, params = profile(net, inputs=(x,))
     # print(flops, params) # 46388784.0 561706.0
     flops, params = clever_format([flops, params], "%.3f")
